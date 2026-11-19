@@ -1044,6 +1044,7 @@ class Auday:
         if re.fullmatch("[0-9a-f]{64}", saved_hash):
             cached = self.root / "audio" / (saved_hash + asset_suffix + suffixes.get(asset.get("mime"), ".bin"))
             if cached.is_file() and sha(cached) == saved_hash:
+                atomic_json(cached.with_suffix(".asset.json"), asset)
                 report("Using verified cached audio", force=True)
                 return {"path": str(cached), "asset": asset, "cacheHit": True}
         with ExitStack() as own:
@@ -1072,6 +1073,7 @@ class Auday:
         target = folder / (expected + asset_suffix + suffix)
         temporary = folder / (expected + asset_suffix + ".partial")
         if target.exists() and sha(target) == expected:
+            atomic_json(target.with_suffix(".asset.json"), asset)
             report("Using verified cached audio", force=True)
             return {"path": str(target), "asset": asset, "cacheHit": True}
         offset = temporary.stat().st_size if temporary.exists() else 0
@@ -1251,6 +1253,14 @@ def main():
     sync = commands.add_parser("sync")
     sync.add_argument("--mode", choices=["incremental", "full"], default="incremental",
                       help="Reuse verified unchanged records by default; full downloads all text again")
+    sync.add_argument("--skip-audio-workflow", action="store_true",
+                      help="Sync text only for this invocation; keep saved audio preferences")
+    workflow = commands.add_parser("audio-workflow", help="Inspect or explicitly enable all-audio re-transcription after sync")
+    workflow_choice = workflow.add_mutually_exclusive_group()
+    workflow_choice.add_argument("--enable", action="store_true")
+    workflow_choice.add_argument("--disable", action="store_true")
+    workflow.add_argument("--languages", nargs="+", help="Document expected languages; ASR still detects each turn")
+    commands.add_parser("retranscribe-local", help="Process cached audio with the verified Qwen3 runtime")
     library = commands.add_parser("library", help="Maintain readable files from the saved library, without the phone")
     library.add_argument("--language", choices=["en", "zh-CN"], default=None,
                          help="Choose file labels; otherwise preserve the library's saved language")
@@ -1287,6 +1297,7 @@ def main():
     capability.add_argument("--defer-semantic", action="store_true")
     capability.add_argument("--audio", action="store_true")
     setup.add_argument("--model", choices=["small", "turbo"])
+    setup.add_argument("--engine", choices=["whisper", "qwen3-mlx"], default="whisper")
     setup.add_argument("--diarize", action=argparse.BooleanOptionalAction, default=True)
     transcribe = commands.add_parser("transcribe", help="Transcribe with the prepared private audio runtime")
     transcribe.add_argument("--audio", type=Path, required=True)
@@ -1336,13 +1347,27 @@ def main():
         elif args.defer_semantic:
             result = first_run.defer_semantic(args.home, args.profile)
         elif args.audio:
-            from audio_setup import setup_audio
-            result = setup_audio(
-                args.home, model=args.model or first_run.recommended_audio_model(), diarize=args.diarize,
-            )
+            if args.engine == "qwen3-mlx":
+                from qwen_audio_setup import setup_qwen
+                result = setup_qwen(args.home, diarize=args.diarize)
+            else:
+                from audio_setup import setup_audio
+                result = setup_audio(
+                    args.home, model=args.model or first_run.recommended_audio_model(), diarize=args.diarize,
+                )
         else:
             result = first_run.setup_status(args.home, args.profile)
             result["recommendedAudioModel"] = first_run.recommended_audio_model()
+        dump(result)
+        return
+    if args.command in ("audio-workflow", "retranscribe-local"):
+        import audio_workflow
+        if args.command == "retranscribe-local":
+            result = audio_workflow.reprocess_local(args.home, args.profile)
+        elif args.enable or args.disable:
+            result = audio_workflow.configure(args.home, args.profile, enabled=args.enable, languages=args.languages)
+        else:
+            result = audio_workflow.preferences(args.home, args.profile)
         dump(result)
         return
     if args.command == "transcribe":
@@ -1452,7 +1477,12 @@ def main():
             subprocess.run(command, check=True)
             atomic_json(app.root / "connection.json", config)
         elif args.command == "sync":
-            dump(app.sync(mode=args.mode))
+            result = app.sync(mode=args.mode)
+            from audio_workflow import after_sync
+            audio_result = after_sync(app, skip=args.skip_audio_workflow)
+            if audio_result is not None:
+                result["audioWorkflow"] = audio_result
+            dump(result)
         elif args.command == "library":
             dump(app.library(language=args.language))
         elif args.command == "status":

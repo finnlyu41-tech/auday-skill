@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "repository": "mlx-community/Qwen3-ASR-1.7B-8bit",
+  "revision": "a8379a2e2f9e313c9292cdf1af4055ab56d50d55",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "rfilename": "README.md",
+      "size": 1008,
+      "blobId": "b835cd3f6d4f5a2dd6b7f3ad83138166bdf5f1b5"
+    },
+    {
+      "rfilename": "chat_template.json",
+      "size": 1161,
+      "blobId": "c44736493efd71ec96218cc626904698cdb13235"
+    },
+    {
+      "rfilename": "config.json",
+      "size": 7188,
+      "blobId": "888cc7fae19ea9ede543b1ae82e9c78aa06104ca"
+    },
+    {
+      "rfilename": "generation_config.json",
+      "size": 142,
+      "blobId": "7382a4d347c0a865b76bb1b8277f66a5ac312854"
+    },
+    {
+      "rfilename": "merges.txt",
+      "size": 1671853,
+      "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+    },
+    {
+      "rfilename": "model.safetensors",
+      "size": 2463307541,
+      "blobId": "de177bf40049eee64602f9128e9daf09cf3d6ff2",
+      "lfs": {
+        "sha256": "bf304b009cc7eca79283056f787b44c952d24ac22cec787b39732bba3c23c13c",
+        "size": 2463307541,
+        "pointerSize": 135
+      }
+    },
+    {
+      "rfilename": "model.safetensors.index.json",
+      "size": 78968,
+      "blobId": "f0191caac2794d5b6fba0ab3eeb70f8eff90319e"
+    },
+    {
+      "rfilename": "preprocessor_config.json",
+      "size": 330,
+      "blobId": "8f7f07346466d5d494ec0d4969d1c3d0190eed72"
+    },
+    {
+      "rfilename": "tokenizer_config.json",
+      "size": 12487,
+      "blobId": "b93109843922a40c6654c5449d3bf95372267c66"
+    },
+    {
+      "rfilename": "vocab.json",
+      "size": 2776833,
+      "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569"
+    }
+  ]
+}

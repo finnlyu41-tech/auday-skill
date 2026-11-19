@@ -96,6 +96,19 @@ class AudioTransferTests(unittest.TestCase):
         app.sync()
         return app
 
+    def test_cached_audio_republishes_missing_provenance_without_phone(self):
+        body = synthetic_bytes("cached-provenance", 1024)
+        phone = SyntheticPhone({"first": body})
+        app = self.client(phone)
+        result = app.audio("first")
+        sidecar = Path(result["path"]).with_suffix(".asset.json")
+        sidecar.unlink()
+        phone.offline = True
+        reused = app.audio("first")
+        self.assertTrue(reused["cacheHit"])
+        self.assertEqual(json.loads(sidecar.read_text())["sha256"], hashlib.sha256(body).hexdigest())
+        self.assertEqual(Path(reused["path"]).read_bytes(), body)
+
     def test_large_chunks_reduce_requests_without_changing_the_file(self):
         body = synthetic_bytes("first", 2 * 1024 * KIB + 300 * KIB)
         phone = SyntheticPhone({"first": body}, advertised=True, accepted=1024 * KIB)

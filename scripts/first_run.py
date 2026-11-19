@@ -94,7 +94,9 @@ def setup_status(root, profile="default"):
         audio = audio_status(root)
     offer = supported and not present and semantic["choice"] == "not_selected"
     resume = supported and not integrity and semantic["choice"] in ("requested", "enabled")
+    from qwen_audio_setup import status as qwen_status
     return {
+        "qwenAudio": qwen_status(root),
         "ok": True, "core": {
             "pythonReady": True,
             "pythonManagedBySetup": _python_managed_by_setup(root),

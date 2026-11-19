@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ("SKILL.md", "LICENSE", "VERSION", "THIRD_PARTY_NOTICES.md")
+FILES = ("SKILL.md", "LICENSE", "VERSION", "THIRD_PARTY_NOTICES.md", "maintenance.json", "MAINTENANCE.md")
 DIRECTORIES = ("agents", "references", "scripts")
 EXCLUDED = {
     ".build",
