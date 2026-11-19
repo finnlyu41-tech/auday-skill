@@ -37,6 +37,10 @@ LARGE_AUDIO_CHUNK_BYTES = 1048576
 # several minutes on the phone.
 SNAPSHOT_PREPARATION_LIMIT_SECONDS = 30 * 60
 SNAPSHOT_PREPARATION_NOTICE_SECONDS = 30
+# The phone's own preparation diagnostic is a `stage:code` pair such as
+# `projection:duplicate_highlight_record`. A fallback code can embed a Swift
+# type name, so the code allows printable ASCII. Anything else is not repeated.
+PREPARATION_ERROR_PATTERN = re.compile(r"[A-Za-z]{1,32}:[ -~]{1,160}")
 # A batch records these against one asset and continues with the next. Any
 # other failure concerns the connection or the snapshot and ends the batch.
 ASSET_FAILURES = frozenset((
@@ -48,6 +52,28 @@ ASSET_FAILURES = frozenset((
 _profile_locks = {}
 _profile_locks_guard = threading.Lock()
 _link_binary = None
+
+
+class SnapshotPreparationFailed(ValueError):
+    """The phone could not prepare its snapshot.
+
+    The error stays `snapshot_preparation_failed`; the phone's reason travels
+    beside it as `preparationError`, only when it has the expected shape.
+    """
+
+    def __init__(self, preparation_error=None):
+        super().__init__("snapshot_preparation_failed")
+        valid = isinstance(preparation_error, str) and PREPARATION_ERROR_PATTERN.fullmatch(preparation_error)
+        self.preparation_error = preparation_error if valid else None
+
+
+def error_payload(error):
+    """The JSON a failed command prints."""
+    payload = {"ok": False, "error": str(error)}
+    preparation_error = getattr(error, "preparation_error", None)
+    if preparation_error:
+        payload["preparationError"] = preparation_error
+    return payload
 
 
 class ProfileOperationLock:
@@ -714,7 +740,7 @@ class Auday:
                     poll["lease"] = token
                 status = self.request(poll)
             if status.get("snapshotState") == "failed":
-                raise ValueError("snapshot_preparation_failed")
+                raise SnapshotPreparationFailed(status.get("preparationError"))
             if status.get("snapshotState") != "ready":
                 raise ValueError("snapshot_not_ready")
             if token is not None:
@@ -947,7 +973,7 @@ class Auday:
                 identities = list(dict.fromkeys(identities))
             else:
                 identities = [row[0] for row in self.db.execute("SELECT id FROM assets ORDER BY id")]
-            assets, failed, stopped = [], [], None
+            assets, failed, stopped, stopped_reason = [], [], None, None
             downloaded = cached = transferred = 0
             for index, identity in enumerate(identities):
                 report("Fetching audio assets", index, len(identities), "assets")
@@ -959,6 +985,7 @@ class Auday:
                     message = str(error) if isinstance(error, ValueError) else type(error).__name__
                     if message.split(":", 1)[0] not in ASSET_FAILURES:
                         stopped = message
+                        stopped_reason = getattr(error, "preparation_error", None)
                         break
                     failed.append({"id": identity, "error": message})
                     continue
@@ -978,6 +1005,8 @@ class Auday:
                 "seconds": round(time.perf_counter() - started, 3),
                 "directory": str(self.root / "audio"),
             }
+            if stopped_reason:
+                summary["preparationError"] = stopped_reason
             if listed:
                 # A whole catalogue can be hundreds of paths; each saved file's
                 # adjacent .asset.json already identifies it.
@@ -1015,6 +1044,7 @@ class Auday:
         if re.fullmatch("[0-9a-f]{64}", saved_hash):
             cached = self.root / "audio" / (saved_hash + asset_suffix + suffixes.get(asset.get("mime"), ".bin"))
             if cached.is_file() and sha(cached) == saved_hash:
+                atomic_json(cached.with_suffix(".asset.json"), asset)
                 report("Using verified cached audio", force=True)
                 return {"path": str(cached), "asset": asset, "cacheHit": True}
         with ExitStack() as own:
@@ -1043,6 +1073,7 @@ class Auday:
         target = folder / (expected + asset_suffix + suffix)
         temporary = folder / (expected + asset_suffix + ".partial")
         if target.exists() and sha(target) == expected:
+            atomic_json(target.with_suffix(".asset.json"), asset)
             report("Using verified cached audio", force=True)
             return {"path": str(target), "asset": asset, "cacheHit": True}
         offset = temporary.stat().st_size if temporary.exists() else 0
@@ -1222,6 +1253,14 @@ def main():
     sync = commands.add_parser("sync")
     sync.add_argument("--mode", choices=["incremental", "full"], default="incremental",
                       help="Reuse verified unchanged records by default; full downloads all text again")
+    sync.add_argument("--skip-audio-workflow", action="store_true",
+                      help="Sync text only for this invocation; keep saved audio preferences")
+    workflow = commands.add_parser("audio-workflow", help="Inspect or explicitly enable all-audio re-transcription after sync")
+    workflow_choice = workflow.add_mutually_exclusive_group()
+    workflow_choice.add_argument("--enable", action="store_true")
+    workflow_choice.add_argument("--disable", action="store_true")
+    workflow.add_argument("--languages", nargs="+", help="Document expected languages; ASR still detects each turn")
+    commands.add_parser("retranscribe-local", help="Process cached audio with the verified Qwen3 runtime")
     library = commands.add_parser("library", help="Maintain readable files from the saved library, without the phone")
     library.add_argument("--language", choices=["en", "zh-CN"], default=None,
                          help="Choose file labels; otherwise preserve the library's saved language")
@@ -1258,6 +1297,7 @@ def main():
     capability.add_argument("--defer-semantic", action="store_true")
     capability.add_argument("--audio", action="store_true")
     setup.add_argument("--model", choices=["small", "turbo"])
+    setup.add_argument("--engine", choices=["whisper", "qwen3-mlx"], default="whisper")
     setup.add_argument("--diarize", action=argparse.BooleanOptionalAction, default=True)
     transcribe = commands.add_parser("transcribe", help="Transcribe with the prepared private audio runtime")
     transcribe.add_argument("--audio", type=Path, required=True)
@@ -1307,13 +1347,27 @@ def main():
         elif args.defer_semantic:
             result = first_run.defer_semantic(args.home, args.profile)
         elif args.audio:
-            from audio_setup import setup_audio
-            result = setup_audio(
-                args.home, model=args.model or first_run.recommended_audio_model(), diarize=args.diarize,
-            )
+            if args.engine == "qwen3-mlx":
+                from qwen_audio_setup import setup_qwen
+                result = setup_qwen(args.home, diarize=args.diarize)
+            else:
+                from audio_setup import setup_audio
+                result = setup_audio(
+                    args.home, model=args.model or first_run.recommended_audio_model(), diarize=args.diarize,
+                )
         else:
             result = first_run.setup_status(args.home, args.profile)
             result["recommendedAudioModel"] = first_run.recommended_audio_model()
+        dump(result)
+        return
+    if args.command in ("audio-workflow", "retranscribe-local"):
+        import audio_workflow
+        if args.command == "retranscribe-local":
+            result = audio_workflow.reprocess_local(args.home, args.profile)
+        elif args.enable or args.disable:
+            result = audio_workflow.configure(args.home, args.profile, enabled=args.enable, languages=args.languages)
+        else:
+            result = audio_workflow.preferences(args.home, args.profile)
         dump(result)
         return
     if args.command == "transcribe":
@@ -1423,7 +1477,12 @@ def main():
             subprocess.run(command, check=True)
             atomic_json(app.root / "connection.json", config)
         elif args.command == "sync":
-            dump(app.sync(mode=args.mode))
+            result = app.sync(mode=args.mode)
+            from audio_workflow import after_sync
+            audio_result = after_sync(app, skip=args.skip_audio_workflow)
+            if audio_result is not None:
+                result["audioWorkflow"] = audio_result
+            dump(result)
         elif args.command == "library":
             dump(app.library(language=args.language))
         elif args.command == "status":
@@ -1466,5 +1525,5 @@ if __name__ == "__main__":
         dump(decision.payload())
         sys.exit(1)
     except (ValueError, KeyError, OSError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as error:
-        dump({"ok": False, "error": str(error)})
+        dump(error_payload(error))
         sys.exit(1)

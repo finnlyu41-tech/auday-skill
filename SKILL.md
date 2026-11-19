@@ -10,6 +10,8 @@ Bring what Auday knows into the user's workflow. Use the user's language when re
 
 The iPhone and computer exchange Auday data directly over an encrypted local protocol, with no cloud server relaying that device-to-device transfer.
 
+Before a new independent task or an installation update, read [Source and installation maintenance](MAINTENANCE.md).
+
 ## Start here
 
 The bundled client runs on macOS, Windows 10/11 x64, or Windows 11 ARM64 and requires a compatible iPhone app with **Connect to your workflow / 接入你的工作流**. Installing this skill does not add that feature to the phone. If the page is missing, explain the companion requirement; do not claim access to recordings or fall back to extracting the phone's private container.
@@ -36,6 +38,7 @@ Recommend local semantic search once during first-run setup, describing its down
 | --- | --- | --- |
 | Install on a new computer or prepare a missing capability | Check the environment, offer semantic setup, prepare selected tools and verify them | [First-run setup](references/first-run.md) |
 | Connect, sync, or recover a connection | Use local discovery and a local password prompt | [Connection](references/connection.md) |
+| Include all audio and local re-transcription in routine sync | Honor explicitly saved per-profile preferences | [Complete audio sync](references/audio-sync-workflow.md) |
 | Browse or maintain a lasting local file library | Refresh the managed library; keep user notes separate from source records | [Local library](references/library.md) |
 | Find a discussion, prepare a brief, reflect, extract follow-ups | Check freshness, search narrowly, expand sources | [Context workflows](references/context.md) |
 | Search by meaning or prepare local semantic retrieval | Check the local model and index, then retrieve relevant passages | [Semantic search](references/semantic-search.md) |
@@ -53,6 +56,7 @@ Recommend local semantic search once during first-run setup, describing its down
 - Use the default incremental sync for ordinary updates. Use `sync --mode full` when the user requests a full refresh or recovery verification. Report any older-phone fallback, actual downloaded/reused/deleted counts, and file-library maintenance separately. A full sync does not recreate semantic vectors or download all audio.
 - Each sync reads one fixed snapshot. Recordings or transcripts arriving during that transfer belong to the next user-requested update. A final `sourceSnapshotCurrent: false` is a coverage note, not an instruction to restart. Finish with the captured time and completed stages; never loop until a changing phone archive becomes current.
 - Have the user enter the communication password through the local pairing prompt. Never put it in chat, a command argument, a screenshot, or a project file. Persist credentials only through macOS Keychain or Windows Credential Manager.
+- Before ordinary sync, inspect `audio-workflow` preferences. When enabled by an explicit user choice, normal sync imports the entire audio catalogue and re-transcribes changed or previously unprocessed media with anonymous speakers; read [Complete audio sync](references/audio-sync-workflow.md). A request for text only uses `--skip-audio-workflow`.
 - Fetch only the recordings a task needs. When that is more than one, give every asset ID to a single `audio` command, or use `audio --all` when the user asks for the whole archive; do not run one command per recording. Repeat the same command to resume an interrupted batch.
 - Access to all text is not a reason to load the whole archive into the model. Search, paginate, and expand only relevant records. Preserve source IDs, timestamps, time zones, record states, and audio availability.
 - Choose keyword retrieval for exact words and semantic retrieval for concepts or paraphrases. If a configured semantic index is missing or stale, build it before the semantic query and show progress. Never present keyword matches as semantic results. Use the maintained [local library](references/library.md) for ongoing file workflows and the readable export for a separate static snapshot. Keep user notes in `notes/`; generated source files are maintained from the phone's saved records.

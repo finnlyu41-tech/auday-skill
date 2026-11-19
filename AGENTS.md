@@ -1,5 +1,7 @@
 # Auday Skill
 
+Source and installation maintenance: [MAINTENANCE.md](MAINTENANCE.md).
+
 This repository distributes the Auday desktop skill. Keep every commit suitable for redistribution. Preserve the existing license and never commit personal recordings, transcripts, pairing secrets, local caches, machine-specific paths, or private development notes.
 
 - `SKILL.md`, `references/`, `agents/`, and `scripts/` are the installable skill. Keep references relative to the skill root. No other Auday checkout may be required at runtime.

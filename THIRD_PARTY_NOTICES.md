@@ -64,3 +64,18 @@ Preserve the licenses supplied with the downloaded runtimes and wheels. No such
 binaries are committed to this repository.
 
 No Auday app source, third-party application logos, model weights, personal recordings, or private datasets are bundled. Tests generate synthetic data locally.
+
+## Optional Qwen3 local audio workflow
+
+The separately installed Apple Silicon runtime uses MLX Audio 0.6.6 and MLX,
+with their upstream licenses retained by the package manager. Their source
+projects are https://github.com/Neywa-Labs/mlx-audio and
+https://github.com/ml-explore/mlx. The locked environment also uses Hugging Face
+Transformers under Apache-2.0 and the existing audio decoder/diarization packages.
+No third-party runtime, model weights or recordings are redistributed here.
+
+The Qwen3-ASR-1.7B 8-bit artifact is an MLX Community conversion of Qwen's
+ASR model, licensed Apache-2.0. Its immutable revision and per-file identities
+are recorded in `scripts/qwen-assets.json`. Download source:
+https://huggingface.co/mlx-community/Qwen3-ASR-1.7B-8bit . This conversion is
+distinct from the original Qwen checkpoint and must be evaluated locally.

@@ -1,0 +1,15 @@
+[project]
+name = "auday-qwen-local-audio"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mlx-audio==0.6.6",
+  "imageio-ffmpeg==0.6.0",
+  "soundfile==0.13.1",
+]
+
+[project.optional-dependencies]
+diarization = ["sherpa-onnx==1.13.5", "sherpa-onnx-core==1.13.5"]
+
+[tool.uv]
+package = false

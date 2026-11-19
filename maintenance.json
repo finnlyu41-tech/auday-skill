@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "auday",
+  "kind": "skill",
+  "business_domain": "Auday read-only phone sync and local context/audio analysis",
+  "repository": "https://github.com/finnlyu41-tech/auday-skill",
+  "branch": "main",
+  "source_path": ".",
+  "maintenance_path": "MAINTENANCE.md",
+  "entrypoints": ["SKILL.md"],
+  "upstream_repository": "https://github.com/666ghj/auday-skill"
+}
