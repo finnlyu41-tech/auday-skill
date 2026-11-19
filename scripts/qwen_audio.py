@@ -157,6 +157,8 @@ class Analyzer:
             raise ValueError('source_audio_changed_during_analysis')
         result = {
             'schemaVersion': 1, 'completed': True, 'pipelineIdentity': self.identity,
+            'reviewStatus': 'machine-output-not-human-verified',
+            'speakerCountMeaning': 'automatic voice clusters, not verified people',
             'createdAt': datetime.now(timezone.utc).isoformat(),
             'source': {'audioSHA256': source_hash, 'asset': asset},
             'engine': {'name': 'Qwen3-ASR-1.7B-8bit', 'revision': self.config['modelRevision'],
@@ -168,7 +170,8 @@ class Analyzer:
                             'turns': turns},
             'elapsedSeconds': round(time.monotonic() - started, 3),
         }
-        lines = ['# Local re-transcription', '', 'Speaker labels are anonymous within this recording.', '']
+        lines = ['# Local re-transcription', '', 'Machine output; no human accuracy review has been performed.',
+                 'Speaker labels are anonymous clusters within this recording; voices may be split or merged.', '']
         for row in segments:
             lines.append(f"[{row['start']:.2f}–{row['end']:.2f}] {row['speaker']}: {row['text']}")
         (output / 'transcript.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
