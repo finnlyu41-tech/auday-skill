@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from progress import report
 from platform_utils import exclusive_file_lock, secure_directory
-from refine_audio import attach_speakers, source_spans
+from refine_audio import attach_speakers, cleanup_prepared_wav, source_spans
 
 PIPELINE_VERSION = 1
 
@@ -177,6 +177,7 @@ class Analyzer:
         (output / 'transcript.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         result['transcriptSHA256'] = digest(output / 'transcript.md')
         atomic_json(output / 'result.json', result)
+        cleanup_prepared_wav(wav)
         report('Local re-transcription complete', force=True)
         return result
 

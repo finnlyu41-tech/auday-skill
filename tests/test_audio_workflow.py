@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -9,6 +10,39 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import audio_workflow as workflow
 import qwen_audio as qwen
+
+
+class PreparedAudioTests(unittest.TestCase):
+    def test_qwen_cleans_wav_only_after_saving_completed_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'original.wav'
+            source.write_bytes(b'original audio')
+            analyzer = qwen.Analyzer({
+                'modelRevision': 'synthetic', 'modelFiles': [], 'runtimeVersion': 'synthetic',
+                'ffmpeg': 'synthetic', 'diarize': False,
+            })
+
+            def decode(command, **kwargs):
+                Path(command[-1]).write_bytes(b'decoded audio')
+
+            soundfile = SimpleNamespace(read=lambda *args, **kwargs: ([0.0] * 16000, 16000))
+            with patch.dict(sys.modules, {'numpy': SimpleNamespace(), 'soundfile': soundfile}), \
+                    patch.object(qwen.subprocess, 'run', side_effect=decode), \
+                    patch.object(analyzer, '_turns', return_value=([], 0)):
+                success = root / 'success'
+                result = analyzer.analyze(source, success)
+                self.assertTrue(qwen.completed_result(
+                    success / 'result.json', result['pipelineIdentity'], qwen.digest(source)))
+                self.assertFalse((success / 'prepared.wav').exists())
+
+                failed = root / 'failed'
+                with patch.object(qwen, 'atomic_json', side_effect=OSError('synthetic write failure')):
+                    with self.assertRaises(OSError):
+                        analyzer.analyze(source, failed)
+                self.assertFalse((failed / 'result.json').exists())
+                self.assertTrue((failed / 'prepared.wav').is_file())
+                self.assertEqual(source.read_bytes(), b'original audio')
 
 
 class WorkflowTests(unittest.TestCase):

@@ -81,7 +81,7 @@ Process individual assets, up to two hours each, sequentially. The runner reject
 - `result.json`: source/model hashes, configuration, relative times, original timeline spans, speaker turns and attribution candidates, and elapsed time.
 - `transcript.md`: readable timestamped output.
 - `whisper.json` and `engine.log`: local raw output and diagnostics, potentially containing private text.
-- `prepared.wav`: a derived 16 kHz mono input, never a replacement for the source.
+- `prepared.wav`: a temporary 16 kHz mono input that is removed after both the transcript and result are saved. Failed runs retain it for diagnosis.
 
 The output directory must be new. A failed run retains intermediate files; use a new directory after fixing the cause. Do not overwrite prior evidence. Ambiguous or poorly covered segments remain `unknown` instead of being forcibly assigned.
 

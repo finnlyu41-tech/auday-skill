@@ -25,6 +25,14 @@ def digest(path):
     return h.hexdigest()
 
 
+def cleanup_prepared_wav(wav):
+    """Release the decoded audio after the transcript and result are saved."""
+    try:
+        wav.unlink(missing_ok=True)
+    except OSError:
+        report("Transcript saved; temporary WAV could not be removed", force=True)
+
+
 def attach_speakers(segments, turns):
     for segment in segments:
         duration = segment["end"] - segment["start"]
@@ -354,6 +362,7 @@ def _analyze(args, audio, model, out, ffmpeg, whisper_cli, native):
         speaker = f"{row['speaker']}：" if args.diarize else ""
         lines.append(f"- [{stamp}] {speaker}{row['text']}")
     (out / "transcript.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    cleanup_prepared_wav(wav)
     report("Local audio analysis complete")
     print(
         json.dumps(

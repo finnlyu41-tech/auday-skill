@@ -132,6 +132,7 @@ class AudioRunnerTests(unittest.TestCase):
             ["speaker_01", "speaker_02"],
         )
         self.assertIn("speaker_01", (self.output / "transcript.md").read_text())
+        self.assertFalse((self.output / "prepared.wav").exists())
         self.assertEqual(self.audio.read_bytes(), source)
         self.assertIn("Identifying anonymous speaker turns", self.progress)
         self.assertIn("Speaker diarization complete", self.progress)
@@ -248,6 +249,7 @@ class AudioRunnerTests(unittest.TestCase):
                 self.assertFalse(reply["ok"])
                 self.assertFalse((self.output / "result.json").exists())
                 self.assertFalse((self.output / "transcript.md").exists())
+                self.assertTrue((self.output / "prepared.wav").is_file())
 
     def test_valid_empty_transcription_remains_a_successful_empty_result(self):
         code, reply = self.execute_engine_json(b'{"transcription": []}')
