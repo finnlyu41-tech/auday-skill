@@ -50,6 +50,28 @@ source intervals and applies compatible automatic matches to the exact
 transcription rows. Refresh the saved mirror immediately after applying labels
 to existing recordings.
 
+### Save validated matches during audio sync
+
+An explicitly enabled and independently tested profile can save automatic names
+in normal audio sync. The private `speaker-matching.json` specifies
+`schemaVersion`, `modelSHA256`, `utcOffsetMinutes`, `enabledAliases`, `people`,
+and `distractors`. Each comparison entry has an `assetID`, an aware `recordedAt`,
+and a verified unit-vector `embedding`; keep the source interval and audio hash
+as private provenance. Enabled aliases must already exist in the base registry.
+Other confirmed voices and playback samples may serve as comparisons. Check
+separate recordings and playback held out from the reference set before enabling
+each voice. Omit one source and nearby recordings from each comparison, and
+require independent dates plus separation from competing voices and playback.
+
+The Qwen audio stage saves exact qualifying intervals to SQLite before the text
+mirror refresh. Completed derivatives can be replayed after an interrupted write.
+Existing labels take precedence on overlapping time ranges. An enabled profile
+keeps other and uncertain voices anonymous; conflicting and recurring unknown
+voices use the single review batch above. An invalid profile preserves anonymous
+transcription and reports that automatic name storage is unavailable. Existing
+transcriptions can be reused when enabling the profile. The config, references,
+and voice features stay on the computer.
+
 When the user requests a synced text copy, run
 `context-mirror --destination <absolute-local-sync-directory>` once against an
 empty destination. Future `sync` commands update that directory after the text
