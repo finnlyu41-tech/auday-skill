@@ -1263,6 +1263,8 @@ def main():
     commands.add_parser("retranscribe-local", help="Process cached audio with the verified Qwen3 runtime")
     context = commands.add_parser("context-mirror", help="Publish readable text to an explicitly chosen synced directory")
     context.add_argument("--destination", type=Path, help="Set the local directory and publish the first snapshot")
+    history = commands.add_parser("speaker-labels", help="Apply verified historical speaker labels to the local database")
+    history.add_argument("--apply", type=Path, required=True)
     library = commands.add_parser("library", help="Maintain readable files from the saved library, without the phone")
     library.add_argument("--language", choices=["en", "zh-CN"], default=None,
                          help="Choose file labels; otherwise preserve the library's saved language")
@@ -1368,6 +1370,13 @@ def main():
         selected_profile = profile_root(args.home, args.profile)
         result = enable(selected_profile, args.destination) if args.destination else refresh_saved(selected_profile)
         dump(result or {"status": "not_configured"})
+        return
+    if args.command == "speaker-labels":
+        from audio_workflow import profile_root
+        from speaker_labels import apply_bundle
+        selected_profile = profile_root(args.home, args.profile)
+        with profile_operation_lock(selected_profile):
+            dump(apply_bundle(selected_profile, args.apply))
         return
     if args.command in ("audio-workflow", "retranscribe-local"):
         import audio_workflow
