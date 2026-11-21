@@ -10,6 +10,7 @@ import sqlite3
 
 from qwen_audio import digest
 from speaker_references import MIN_MARGIN, MIN_SECONDS, MIN_SIMILARITY, read_references
+from speaker_profiles import POLICY
 
 
 SCHEMA = """
@@ -139,3 +140,64 @@ def apply_bundle(profile, path):
     return {'recordings': len({r[0] for r in rows}),
             'automaticMatches': counts.get('automatic_match', 0),
             'confirmedIntervals': counts.get('user_confirmed', 0)}
+
+
+def eligible_sync_match(match, policy):
+    return (isinstance(match, dict) and match.get('policy') == POLICY
+            and match.get('profileSHA256') == policy.identity and isinstance(match.get('alias'), str)
+            and match['alias'] in policy.enabled
+            and match.get('status') == 'automatic_candidate')
+
+
+def has_sync_match(item, policy):
+    return any(eligible_sync_match(row.get('speakerMatch'), policy) for row in item['segments'])
+
+
+def save_sync_matches(profile, derivatives, references, policy):
+    """Commit only new compatible rows. A completed derivative can be replayed after interruption."""
+    result = {'inserted': 0, 'existingOrOverlapping': 0}
+    if not derivatives:
+        return result
+    database = Path(profile) / 'library.sqlite'
+    snapshot = hashlib.sha256(json.dumps(references, sort_keys=True).encode()).hexdigest()
+    with closing(sqlite3.connect(database.as_uri() + '?mode=rw', uri=True)) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        db.execute(SCHEMA)
+        db.execute('CREATE INDEX IF NOT EXISTS audio_speaker_labels_by_name ON audio_speaker_labels(label,recorded_at)')
+        for path, item in derivatives:
+            source = item['source']
+            asset_id = source['asset']['id']
+            stored = db.execute('SELECT body FROM assets WHERE id=?', (asset_id,)).fetchone()
+            if stored is None:
+                continue
+            asset = json.loads(stored[0])
+            media = source['audioSHA256']
+            transcript = item['transcriptSHA256']
+            if (asset.get('sha256') and asset['sha256'] != media) or asset.get('start') != source['asset'].get('start'):
+                continue
+            if item.get('completed') is not True or digest(path.with_name('transcript.md')) != transcript:
+                raise ValueError('invalid_sync_speaker_transcript')
+            matches = []
+            for index, row in enumerate(item['segments']):
+                match = row.get('speakerMatch')
+                if eligible_sync_match(match, policy):
+                    alias = match['alias']
+                    matches.append({'segmentIndex': index, 'start': row['start'], 'end': row['end'],
+                                    'speakerCluster': row['speaker'], 'status': 'automatic_match',
+                                    'label': references.get('displayNames', {}).get(alias, alias),
+                                    'similarity': match['similarity'], 'margin': match['margin']})
+            bundle = {'schemaVersion': 1, 'referenceSnapshot': snapshot, 'sourceScanSHA256': policy.identity,
+                      'recordings': [{'assetID': asset_id, 'audioSHA256': media, 'transcriptSHA256': transcript,
+                                      'start': asset['start'], 'confirmed': [], 'automatic': matches}]}
+            rows = source_rows(bundle, {asset_id: (asset, item)}, references)
+            protected = db.execute('SELECT start_seconds,end_seconds FROM audio_speaker_labels '
+                                   'WHERE asset_id=? AND audio_sha256=?', (asset_id, media)).fetchall()
+            for row in rows:
+                start, end = row[4:6]
+                if any(min(end, right) - max(start, left) > .12 for left, right in protected):
+                    result['existingOrOverlapping'] += 1
+                    continue
+                db.execute('INSERT INTO audio_speaker_labels VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', row)
+                protected.append((start, end))
+                result['inserted'] += 1
+    return result

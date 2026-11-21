@@ -12,6 +12,7 @@ from library_export import export_library, literal_block, record_day
 from platform_utils import exclusive_file_lock
 from qwen_audio import atomic_json, digest
 from speaker_labels import current_transcripts, saved_labels
+from speaker_profiles import POLICY
 from speaker_references import read_references, visible_speaker
 
 
@@ -64,7 +65,9 @@ def document_set(profile, root):
                               if ref['audioSHA256'] == item['source']['audioSHA256'] and
                               ref['speakerCluster'] == row['speaker'] and
                               min(end, ref['end']) - max(start, ref['start']) >= 2.5}
-                    speaker = visible_speaker(row)
+                    match = row.get('speakerMatch')
+                    pending_write = isinstance(match, dict) and match.get('policy') == POLICY
+                    speaker = row['speaker'] if pending_write else visible_speaker(row)
                     historic = automatic.get(segment)
                     if any(min(end, b) - max(start, a) > .12 for a, b, _ in confirmed):
                         speaker = row['speaker']
@@ -77,7 +80,7 @@ def document_set(profile, root):
                         speaker = f"{historic['name']}（自动匹配）"
                         archive_automatic += 1
                         named_count += 1
-                    elif row.get('speakerMatch'):
+                    elif match and not pending_write:
                         named_count += 1
                     spans = row.get('sourceSpans') or []
                     stamp = spans[0].get('start', '') if spans else ''

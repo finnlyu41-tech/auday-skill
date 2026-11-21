@@ -63,7 +63,7 @@ def suggest(vector, people, exclude_asset=None):
 
 
 class SpeakerMatcher:
-    def __init__(self, model, references):
+    def __init__(self, model, references, cross_day=None, anonymous_only=False):
         import sherpa_onnx
         if digest(model) != references['modelSHA256']:
             raise ValueError('speaker_reference_model_changed')
@@ -73,11 +73,14 @@ class SpeakerMatcher:
         self.extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
         self.people = references['people']
         self.display_names = references.get('displayNames', {})
+        self.cross_day = cross_day
+        self.anonymous_only = anonymous_only
 
-    def tag(self, segments, turns, samples, asset_id=None):
+    def tag(self, segments, turns, samples, asset_id=None, recorded_at=None):
         import numpy as np
         from speaker_review import candidate_signals
         evidence = []
+        named = {}
         for row in segments:
             start, end, speaker = row['start'], row['end'], row['speaker']
             if speaker == 'unknown' or end - start < MIN_SECONDS:
@@ -95,7 +98,12 @@ class SpeakerMatcher:
             if not math.isfinite(norm) or norm <= 0:
                 continue
             embedding = (vector/norm).tolist()
-            candidate = suggest(embedding, self.people, exclude_asset=asset_id)
+            if self.cross_day:
+                candidate = self.cross_day.suggest(embedding, asset_id, recorded_at)
+            elif self.anonymous_only:
+                candidate = None
+            else:
+                candidate = suggest(embedding, self.people, exclude_asset=asset_id)
             evidence.append({'start': start, 'end': stop, 'speaker': speaker, 'embedding': embedding,
                              'alias': candidate['alias'] if candidate else None})
             if candidate:
@@ -103,6 +111,11 @@ class SpeakerMatcher:
                 if isinstance(name, str) and 0 < len(name) <= 80 and name.isprintable():
                     candidate['displayName'] = name
                 row['speakerMatch'] = candidate
+                named.setdefault(speaker, set()).add(candidate['alias'])
+        if self.cross_day:
+            for row in segments:
+                if len(named.get(row['speaker'], ())) > 1:
+                    row.pop('speakerMatch', None)
         return candidate_signals(evidence)
 
 

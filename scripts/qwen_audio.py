@@ -157,7 +157,7 @@ class Analyzer:
         reviews = []
         if self.speaker_matcher is not None:
             report('Matching enrolled speakers locally', force=True)
-            reviews = self.speaker_matcher.tag(segments, turns, samples, asset.get('id'))
+            reviews = self.speaker_matcher.tag(segments, turns, samples, asset.get('id'), asset.get('start'))
         if digest(audio) != source_hash:
             raise ValueError('source_audio_changed_during_analysis')
         result = {
@@ -234,22 +234,33 @@ def analysis_key(asset, source_hash, pipeline_identity):
 
 
 def _process_batch(profile, config, limit=None):
+    import sqlite3
     from speaker_review import review_summary
+    from speaker_profiles import load as load_speaker_profile
 
     profile = Path(profile).resolve()
     analyzer = Analyzer(config)
     analyzer.verify()
+    speaker_profile = None
+    invalid_profile = False
+    references = None
     if config.get('diarize', True):
         from speaker_references import SpeakerMatcher, read_references
         references = read_references(profile)
+        try:
+            speaker_profile = load_speaker_profile(profile, references)
+        except (ValueError, OSError, TypeError):
+            invalid_profile = True
         if references:
-            analyzer.speaker_matcher = SpeakerMatcher(config['embeddingModel'], references)
+            analyzer.speaker_matcher = SpeakerMatcher(config['embeddingModel'], references, speaker_profile,
+                                                      anonymous_only=invalid_profile)
     inputs = list(local_audio(profile))
     if limit is not None:
         inputs = inputs[:limit]
     completed = reused = 0
     failed = []
     review_inputs = []
+    completed_for_labels = []
     invalid_reviews = 0
     for index, (audio, asset) in enumerate(inputs):
         source_hash = digest(audio)
@@ -269,7 +280,12 @@ def _process_batch(profile, config, limit=None):
             except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
                 failed.append({'assetKey': key, 'errorType': type(error).__name__})
         try:
-            expected = json.loads(saved.read_text()).get('speakerReviewSHA256') if saved else None
+            document = json.loads(saved.read_text()) if saved else None
+            if speaker_profile and document is not None:
+                from speaker_labels import has_sync_match
+                if has_sync_match(document, speaker_profile):
+                    completed_for_labels.append((saved, document))
+            expected = document.get('speakerReviewSHA256') if document is not None else None
             if expected:
                 review_path = saved.with_name('speaker-review.json')
                 if digest(review_path) != expected:
@@ -283,6 +299,17 @@ def _process_batch(profile, config, limit=None):
               'outputDirectory': str(profile / 'derivatives' / 'qwen3-asr')}
     if review_inputs or invalid_reviews:
         result['speakerReview'] = {**review_summary(profile, review_inputs), 'invalidDerivatives': invalid_reviews}
+    if speaker_profile:
+        from speaker_labels import save_sync_matches
+        try:
+            counts = save_sync_matches(profile, completed_for_labels, references, speaker_profile)
+            result['speakerLabels'] = {'status': 'saved', **counts}
+        except (ValueError, OSError, RuntimeError, KeyError, TypeError, sqlite3.Error) as error:
+            result['speakerLabels'] = {'status': 'failed', 'errorType': type(error).__name__}
+            result['complete'] = False
+    elif invalid_profile:
+        result['speakerLabels'] = {'status': 'invalid_profile'}
+        result['complete'] = False
     return result
 
 

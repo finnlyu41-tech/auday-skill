@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import context_mirror
 import speaker_labels
+from speaker_profiles import CrossDayProfile
 from speaker_references import suggest
 from speaker_review import candidate_signals, review_summary
 
@@ -27,6 +28,74 @@ class SpeakerSuggestions(unittest.TestCase):
         self.assertIsNone(suggest([0.73, 0.68, 0.0], self.references))
         self.assertIsNone(suggest([0.0, 0.0, 1.0], self.references))
         self.assertIsNone(suggest([1.0, 0.0, 0.0], self.references, exclude_asset='sample-a'))
+
+
+class ValidatedSyncLabels(unittest.TestCase):
+    @staticmethod
+    def profile():
+        def sample(asset, day, vector):
+            return {'assetID': asset, 'recordedAt': f'2026-01-{day:02}T12:00:00Z', 'embedding': vector}
+
+        model = 'a' * 64
+        return CrossDayProfile({'schemaVersion': 1, 'modelSHA256': model, 'utcOffsetMinutes': 480,
+            'enabledAliases': ['A'], 'people': {
+                'A': [sample('a', 1, [1, 0, 0]), sample('b', 2, [1, 0, 0])],
+                'B': [sample('c', 1, [0, 1, 0]), sample('d', 2, [0, 1, 0])]},
+            'distractors': [sample('media', 1, [0, 0, 1])]}, model, ['A', 'B'])
+
+    def test_new_source_needs_two_dates_and_an_enabled_name(self):
+        profile = self.profile()
+        date = '2026-01-03T12:00:00Z'
+        match = profile.suggest([1, 0, 0], 'new', date)
+        self.assertEqual((match['alias'], match['profileSHA256']), ('A', profile.identity))
+        self.assertIsNone(profile.suggest([1, 0, 0], 'a', date))
+        self.assertIsNone(profile.suggest([1, 0, 0], 'new', '2026-01-02T12:30:00Z'))
+        self.assertIsNone(profile.suggest([0, 1, 0], 'new', date))
+        self.assertIsNone(profile.suggest([0, 0, 1], 'new', date))
+
+    def test_completed_derivative_retries_without_replacing_manual_labels(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            policy = self.profile()
+            date, media = '2026-01-03T12:00:00Z', 'e' * 64
+            match = policy.suggest([1, 0, 0], 'new', date)
+            asset = {'id': 'new', 'start': date, 'sha256': media}
+            run = profile / 'derivatives/qwen3-asr/key/run'
+            run.mkdir(parents=True)
+            transcript = run / 'transcript.md'
+            transcript.write_text('local derivative')
+            path = run / 'result.json'
+            item = {'completed': True, 'source': {'asset': asset, 'audioSHA256': media},
+                    'createdAt': date, 'duration': 16,
+                    'transcriptSHA256': hashlib.sha256(transcript.read_bytes()).hexdigest(),
+                    'segments': [{'start': i, 'end': i+6, 'speaker': 's1', 'text': 'sample',
+                                  'speakerMatch': match} for i in (0, 8)]}
+            path.write_text(json.dumps(item))
+            registry = {'people': {'A': [], 'B': []}}
+            with sqlite3.connect(profile / 'library.sqlite') as db:
+                db.execute('CREATE TABLE assets(id TEXT, body TEXT)')
+                db.execute('INSERT INTO assets VALUES (?,?)', ('new', json.dumps(asset)))
+                db.execute(speaker_labels.SCHEMA)
+                db.execute('INSERT INTO audio_speaker_labels VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                           ('new', media, item['transcriptSHA256'], date, 1, 4, 's1', 'B', 'user_confirmed',
+                            None, None, None, None, 'evidence'))
+
+            def phone_export(_, stage, language):
+                stage.mkdir()
+                (stage / 'manifest.json').touch()
+                return {'recordCount': 1, 'syncedAt': date}
+
+            with patch.object(context_mirror, 'export_library', side_effect=phone_export):
+                before, after = profile / 'before', profile / 'after'
+                before.mkdir()
+                after.mkdir()
+                self.assertEqual(context_mirror.document_set(profile, before)['archiveAutomaticMatches'], 0)
+                self.assertEqual(speaker_labels.save_sync_matches(profile, [(path, item)], registry, policy),
+                                 {'inserted': 1, 'existingOrOverlapping': 1})
+                self.assertEqual(speaker_labels.save_sync_matches(profile, [(path, item)], registry, policy),
+                                 {'inserted': 0, 'existingOrOverlapping': 2})
+                report = context_mirror.document_set(profile, after)
+                self.assertEqual((report['archiveAutomaticMatches'], report['archiveConfirmedIntervals']), (1, 1))
 
 
 class TextMirror(unittest.TestCase):
