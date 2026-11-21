@@ -41,6 +41,7 @@ Recommend local semantic search once during first-run setup, describing its down
 | Include all audio and local re-transcription in routine sync | Honor explicitly saved per-profile preferences | [Complete audio sync](references/audio-sync-workflow.md) |
 | Browse or maintain a lasting local file library | Refresh the managed library; keep user notes separate from source records | [Local library](references/library.md) |
 | Find a discussion, prepare a brief, reflect, extract follow-ups | Check freshness, search narrowly, expand sources | [Context workflows](references/context.md) |
+| Set up local named speaker suggestions or a synced text mirror | Inspect user-confirmed scope and configured destination | [Speaker references and text mirror](references/speaker-context.md) |
 | Search by meaning or prepare local semantic retrieval | Check the local model and index, then retrieve relevant passages | [Semantic search](references/semantic-search.md) |
 | Analyze recordings on the computer | Fetch selected audio and create independent local derivatives | [Audio analysis](references/audio.md) |
 | Choose transcription models for a language or dialect | Adapt to actual speech, quality/turnaround needs and existing local tools | [Language strategies](references/audio-language-routing.md) |

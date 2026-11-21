@@ -1261,6 +1261,8 @@ def main():
     workflow_choice.add_argument("--disable", action="store_true")
     workflow.add_argument("--languages", nargs="+", help="Document expected languages; ASR still detects each turn")
     commands.add_parser("retranscribe-local", help="Process cached audio with the verified Qwen3 runtime")
+    context = commands.add_parser("context-mirror", help="Publish readable text to an explicitly chosen synced directory")
+    context.add_argument("--destination", type=Path, help="Set the local directory and publish the first snapshot")
     library = commands.add_parser("library", help="Maintain readable files from the saved library, without the phone")
     library.add_argument("--language", choices=["en", "zh-CN"], default=None,
                          help="Choose file labels; otherwise preserve the library's saved language")
@@ -1359,6 +1361,13 @@ def main():
             result = first_run.setup_status(args.home, args.profile)
             result["recommendedAudioModel"] = first_run.recommended_audio_model()
         dump(result)
+        return
+    if args.command == "context-mirror":
+        from audio_workflow import profile_root
+        from context_mirror import enable, refresh_saved
+        selected_profile = profile_root(args.home, args.profile)
+        result = enable(selected_profile, args.destination) if args.destination else refresh_saved(selected_profile)
+        dump(result or {"status": "not_configured"})
         return
     if args.command in ("audio-workflow", "retranscribe-local"):
         import audio_workflow
@@ -1482,6 +1491,13 @@ def main():
             audio_result = after_sync(app, skip=args.skip_audio_workflow)
             if audio_result is not None:
                 result["audioWorkflow"] = audio_result
+            from context_mirror import refresh_saved
+            try:
+                context_result = refresh_saved(app.root)
+                if context_result is not None:
+                    result["contextMirror"] = context_result
+            except (OSError, ValueError, KeyError) as error:
+                result["contextMirror"] = {"status": "failed", "errorType": type(error).__name__}
             dump(result)
         elif args.command == "library":
             dump(app.library(language=args.language))
