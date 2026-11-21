@@ -65,6 +65,7 @@ class Analyzer:
         self.config = config
         self.model = None
         self.speaker_engine = None
+        self.speaker_matcher = None
         self.identity = hashlib.sha256(json.dumps({
             'pipelineVersion': PIPELINE_VERSION,
             'modelRevision': config['modelRevision'],
@@ -153,6 +154,9 @@ class Analyzer:
             report('Transcribing speaker turns locally', index + 1, len(windows), 'turns')
         if self.config.get('diarize', True):
             attach_speakers(segments, turns)
+        if self.speaker_matcher is not None:
+            report('Matching enrolled speakers locally', force=True)
+            self.speaker_matcher.tag(segments, turns, samples, asset.get('id'))
         if digest(audio) != source_hash:
             raise ValueError('source_audio_changed_during_analysis')
         result = {
@@ -172,8 +176,9 @@ class Analyzer:
         }
         lines = ['# Local re-transcription', '', 'Machine output; no human accuracy review has been performed.',
                  'Speaker labels are anonymous clusters within this recording; voices may be split or merged.', '']
+        from speaker_references import visible_speaker
         for row in segments:
-            lines.append(f"[{row['start']:.2f}–{row['end']:.2f}] {row['speaker']}: {row['text']}")
+            lines.append(f"[{row['start']:.2f}–{row['end']:.2f}] {visible_speaker(row)}: {row['text']}")
         (output / 'transcript.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         result['transcriptSHA256'] = digest(output / 'transcript.md')
         atomic_json(output / 'result.json', result)
@@ -227,6 +232,11 @@ def _process_batch(profile, config, limit=None):
     profile = Path(profile).resolve()
     analyzer = Analyzer(config)
     analyzer.verify()
+    if config.get('diarize', True):
+        from speaker_references import SpeakerMatcher, read_references
+        references = read_references(profile)
+        if references:
+            analyzer.speaker_matcher = SpeakerMatcher(config['embeddingModel'], references)
     inputs = list(local_audio(profile))
     if limit is not None:
         inputs = inputs[:limit]
