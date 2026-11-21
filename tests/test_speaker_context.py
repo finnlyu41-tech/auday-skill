@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import context_mirror
 from speaker_references import suggest
+from speaker_review import candidate_signals, review_summary
 
 
 class SpeakerSuggestions(unittest.TestCase):
@@ -80,3 +81,33 @@ class TextMirror(unittest.TestCase):
                 self.assertEqual((destination / 'index.md').read_text(), 'index.md')
                 state = json.loads((profile / 'context-mirror-state.json').read_text())
                 self.assertNotIn('pending', state)
+
+
+class SpeakerReview(unittest.TestCase):
+    def sample(self, start, embedding, alias=None, speaker='s1'):
+        return {'speaker': speaker, 'start': start, 'end': start+5, 'embedding': embedding, 'alias': alias}
+
+    def test_recurring_unidentified_voice_is_one_card_with_two_exact_clips(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary)
+            first = candidate_signals([self.sample(0, [1,0])])
+            unrelated = candidate_signals([self.sample(0, [0,1])])
+            second = candidate_signals([self.sample(10, [1,0])])
+            data = [(profile / f'{label}.caf', {'id': label, 'sha256': label*64}, signal)
+                    for label, signal in [('a', first), ('b', unrelated), ('c', second)]]
+            report = review_summary(profile, data)
+            self.assertEqual(report['pending'], 1)
+            self.assertEqual(report['waitingForClearerAudio'], 1)
+            item = report['items'][0]
+            self.assertEqual(item['recordings'], 2)
+            self.assertEqual([clip['assetID'] for clip in item['clips']], ['a', 'c'])
+            self.assertTrue(all('embedding' not in clip for clip in item['clips']))
+
+    def test_conflict_shows_distinct_evidence_and_known_voice_needs_no_duplicate_review(self):
+        self.assertEqual(candidate_signals([self.sample(0,[1,0],'A'),self.sample(6,[1,0])]), [])
+        signals = candidate_signals([self.sample(0,[1,0],'A'),self.sample(6,[0,1],'B'),
+                                     self.sample(12,[0,1],'B')])
+        self.assertEqual(signals[0]['reason'], 'conflicting_matches')
+        self.assertEqual([r['alias'] for r in signals[0]['examples']], ['A','B'])
+        mixed = candidate_signals([self.sample(0,[1,0],'A'),self.sample(6,[0,1])])
+        self.assertEqual(mixed[0]['reason'], 'possibly_mixed_voice')

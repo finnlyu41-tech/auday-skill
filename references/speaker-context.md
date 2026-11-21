@@ -18,6 +18,28 @@ New Qwen runs can suggest a name alongside the anonymous cluster. Existing
 transcripts remain intact. For the user-confirmed samples the exported copy adds
 an explicit confirmation label to the corresponding time interval.
 
+## Review new voices after sync
+
+With enrolled voices, new local Qwen results keep small private review signals.
+The normal sync result includes `audioWorkflow.transcription.speakerReview`
+when those signals exist. It prioritizes conflicting names, then recurring or
+particularly clear unknown voices. Each item gives one or two time ranges with
+the original local audio path and SHA-256. Use that path to make short local
+listening clips after checking the hash. A short isolated unknown can wait for
+clearer evidence. Similarity only groups examples for review.
+
+Ask for one label per coherent voice, and present conflicting samples as
+separate clips. If the user hears different people, preserve exact interval
+labels. Save decisions locally under the profile's `speaker-review/` directory
+in an `auday-speaker-review-*.json` file with a `decisions` list. Each entry
+contains `assetID`, `audioSHA256`, `choice`, the confirmed `label`, and
+`windows` containing the confirmed start and end seconds. This suppresses
+repeated auditions of reviewed ranges on the next sync. Use the enrollment
+procedure above for clear, approved names. A review receipt alone does not
+activate a new person or define the identity of an entire recording.
+
+## Refresh the text mirror
+
 When the user requests a synced text copy, run
 `context-mirror --destination <absolute-local-sync-directory>` once against an
 empty destination. Future `sync` commands update that directory after the text
