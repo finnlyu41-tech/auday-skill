@@ -28,8 +28,9 @@ the original local audio path and SHA-256. Use that path to make short local
 listening clips after checking the hash. A short isolated unknown can wait for
 clearer evidence. Similarity only groups examples for review.
 
-Ask for one label per coherent voice, and present conflicting samples as
-separate clips. If the user hears different people, preserve exact interval
+Collect unresolved representative samples into one review request rather than
+prompting for each fragment. Ask for one label per coherent voice, and present
+conflicting samples as separate clips. If the user hears different people, preserve exact interval
 labels. Save decisions locally under the profile's `speaker-review/` directory
 in an `auday-speaker-review-*.json` file with a `decisions` list. Each entry
 contains `assetID`, `audioSHA256`, `choice`, the confirmed `label`, and
@@ -39,6 +40,15 @@ procedure above for clear, approved names. A review receipt alone does not
 activate a new person or define the identity of an entire recording.
 
 ## Refresh the text mirror
+
+When asked to apply an existing historical speaker scan, use
+`speaker-labels --apply <verified-local-annotation-bundle.json>`. It checks
+the active references, audio and transcript hashes, and exact source ranges.
+The local database stores names and statuses in `audio_speaker_labels`, separately
+from the synchronized phone records. The readable mirror shows confirmed
+source intervals and applies compatible automatic matches to the exact
+transcription rows. Refresh the saved mirror immediately after applying labels
+to existing recordings.
 
 When the user requests a synced text copy, run
 `context-mirror --destination <absolute-local-sync-directory>` once against an

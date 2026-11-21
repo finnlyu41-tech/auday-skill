@@ -1,5 +1,7 @@
+import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -7,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import context_mirror
+import speaker_labels
 from speaker_references import suggest
 from speaker_review import candidate_signals, review_summary
 
@@ -111,3 +114,69 @@ class SpeakerReview(unittest.TestCase):
         self.assertEqual([r['alias'] for r in signals[0]['examples']], ['A','B'])
         mixed = candidate_signals([self.sample(0,[1,0],'A'),self.sample(6,[0,1])])
         self.assertEqual(mixed[0]['reason'], 'possibly_mixed_voice')
+
+
+class HistoricalSpeakerLabels(unittest.TestCase):
+    def test_apply_is_idempotent_and_mirror_checks_exact_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary)
+            date = '2026-01-01T12:00:00+00:00'
+            media = 'a' * 64
+            asset = {'id': 'synthetic', 'sha256': media, 'start': date}
+            registry = {'people': {'A': []}}
+            run = profile / 'derivatives/qwen3-asr/key/run'
+            run.mkdir(parents=True)
+            text = run / 'transcript.md'
+            text.write_text('original derivative')
+            checksum = hashlib.sha256(text.read_bytes()).hexdigest()
+            item = {
+                'completed': True, 'transcriptSHA256': checksum, 'createdAt': date, 'duration': 30,
+                'source': {'asset': asset, 'audioSHA256': media},
+                'segments': [{'start': 0, 'end': 6, 'speaker': 's1', 'text': 'first'},
+                             {'start': 8, 'end': 14, 'speaker': 's1', 'text': 'second'}],
+            }
+            (run / 'result.json').write_text(json.dumps(item))
+            db_path = profile / 'library.sqlite'
+            with sqlite3.connect(db_path) as db:
+                db.execute('CREATE TABLE assets(id TEXT, body TEXT)')
+                db.execute('INSERT INTO assets VALUES (?,?)', (asset['id'], json.dumps(asset)))
+            bundle_path = profile / 'verified-labels.json'
+            bundle = {
+                'schemaVersion': 1, 'sourceScanSHA256': 'b' * 64,
+                'referenceSnapshot': hashlib.sha256(json.dumps(registry, sort_keys=True).encode()).hexdigest(),
+                'recordings': [{'assetID': 'synthetic', 'audioSHA256': media, 'transcriptSHA256': checksum,
+                                'start': date,
+                                'confirmed': [{'assetID': 'synthetic', 'audioSHA256': media, 'start': 1, 'end': 5,
+                                               'speakerCluster': 's1', 'status': 'user_confirmed', 'label': 'B'}],
+                                'automatic': [{'start': 8, 'end': 14, 'speakerCluster': 's1',
+                                               'status': 'automatic_match', 'label': 'A', 'segmentIndex': 1,
+                                               'similarity': .85, 'margin': .2}]}],
+            }
+            bundle_path.write_text(json.dumps(bundle))
+            expected = {'recordings': 1, 'automaticMatches': 1, 'confirmedIntervals': 1}
+            with patch.object(speaker_labels, 'read_references', return_value=registry):
+                self.assertEqual(speaker_labels.apply_bundle(profile, bundle_path), expected)
+                self.assertEqual(speaker_labels.apply_bundle(profile, bundle_path), expected)
+                bundle['recordings'][0]['automatic'][0]['segmentIndex'] = 0
+                bundle_path.write_text(json.dumps(bundle))
+                with self.assertRaisesRegex(ValueError, 'invalid_historical_speaker_label_interval'):
+                    speaker_labels.apply_bundle(profile, bundle_path)
+            with sqlite3.connect(db_path) as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM audio_speaker_labels').fetchone(), (2,))
+                self.assertEqual(json.loads(db.execute('SELECT body FROM assets').fetchone()[0]), asset)
+            self.assertEqual(text.read_text(), 'original derivative')
+
+            def phone_export(_, path, language):
+                path.mkdir()
+                (path / 'manifest.json').touch()
+                return {'recordCount': 1, 'syncedAt': date}
+
+            with patch.object(context_mirror, 'export_library', side_effect=phone_export):
+                stage = profile / 'mirror'
+                stage.mkdir()
+                result = context_mirror.document_set(profile, stage)
+                self.assertEqual(result['archiveAutomaticMatches'], 1)
+                self.assertEqual(result['archiveConfirmedIntervals'], 1)
+                output = (stage / '本机重转录/2026-01-01.md').read_text()
+                self.assertIn('B（已确认片段）', output)
+                self.assertIn('A（自动匹配）', output)
