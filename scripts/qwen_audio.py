@@ -154,9 +154,10 @@ class Analyzer:
             report('Transcribing speaker turns locally', index + 1, len(windows), 'turns')
         if self.config.get('diarize', True):
             attach_speakers(segments, turns)
+        reviews = []
         if self.speaker_matcher is not None:
             report('Matching enrolled speakers locally', force=True)
-            self.speaker_matcher.tag(segments, turns, samples, asset.get('id'))
+            reviews = self.speaker_matcher.tag(segments, turns, samples, asset.get('id'))
         if digest(audio) != source_hash:
             raise ValueError('source_audio_changed_during_analysis')
         result = {
@@ -181,6 +182,10 @@ class Analyzer:
             lines.append(f"[{row['start']:.2f}–{row['end']:.2f}] {visible_speaker(row)}: {row['text']}")
         (output / 'transcript.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         result['transcriptSHA256'] = digest(output / 'transcript.md')
+        if reviews:
+            review_path = output / 'speaker-review.json'
+            atomic_json(review_path, reviews)
+            result['speakerReviewSHA256'] = digest(review_path)
         atomic_json(output / 'result.json', result)
         cleanup_prepared_wav(wav)
         report('Local re-transcription complete', force=True)
@@ -229,6 +234,8 @@ def analysis_key(asset, source_hash, pipeline_identity):
 
 
 def _process_batch(profile, config, limit=None):
+    from speaker_review import review_summary
+
     profile = Path(profile).resolve()
     analyzer = Analyzer(config)
     analyzer.verify()
@@ -242,25 +249,41 @@ def _process_batch(profile, config, limit=None):
         inputs = inputs[:limit]
     completed = reused = 0
     failed = []
+    review_inputs = []
+    invalid_reviews = 0
     for index, (audio, asset) in enumerate(inputs):
-        key = analysis_key(asset, digest(audio), analyzer.identity)
+        source_hash = digest(audio)
+        key = analysis_key(asset, source_hash, analyzer.identity)
         parent = profile / 'derivatives' / 'qwen3-asr' / key
-        prior = sorted(parent.glob('*/result.json')) if parent.exists() else []
-        valid = any(completed_result(previous, analyzer.identity, digest(audio)) for previous in prior)
-        if valid:
+        prior = sorted(parent.glob('*/result.json'), reverse=True) if parent.exists() else []
+        saved = next((previous for previous in prior
+                      if completed_result(previous, analyzer.identity, source_hash)), None)
+        if saved is not None:
             reused += 1
-            report('Re-transcribing local audio', index + 1, len(inputs), 'assets')
-            continue
-        output = parent / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + os.urandom(4).hex())
+        else:
+            output = parent / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + os.urandom(4).hex())
+            try:
+                analyzer.analyze(audio, output, asset)
+                saved = output / 'result.json'
+                completed += 1
+            except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
+                failed.append({'assetKey': key, 'errorType': type(error).__name__})
         try:
-            analyzer.analyze(audio, output, asset)
-            completed += 1
-        except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as error:
-            failed.append({'assetKey': key, 'errorType': type(error).__name__})
-        report('Re-transcribing local audio', index + 1, len(inputs), 'assets', force=True)
-    return {'completed': completed, 'reused': reused, 'failed': failed,
-            'localAssets': len(inputs), 'complete': not failed,
-            'outputDirectory': str(profile / 'derivatives' / 'qwen3-asr')}
+            expected = json.loads(saved.read_text()).get('speakerReviewSHA256') if saved else None
+            if expected:
+                review_path = saved.with_name('speaker-review.json')
+                if digest(review_path) != expected:
+                    raise ValueError('speaker_review_integrity_failed')
+                review_inputs.append((audio, asset, json.loads(review_path.read_text())))
+        except (ValueError, OSError):
+            invalid_reviews += 1
+        report('Re-transcribing local audio', index + 1, len(inputs), 'assets', force=saved is None or saved not in prior)
+    result = {'completed': completed, 'reused': reused, 'failed': failed,
+              'localAssets': len(inputs), 'complete': not failed,
+              'outputDirectory': str(profile / 'derivatives' / 'qwen3-asr')}
+    if review_inputs or invalid_reviews:
+        result['speakerReview'] = {**review_summary(profile, review_inputs), 'invalidDerivatives': invalid_reviews}
+    return result
 
 
 def process_batch(profile, config, limit=None):

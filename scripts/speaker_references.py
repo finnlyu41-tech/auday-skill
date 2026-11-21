@@ -72,9 +72,12 @@ class SpeakerMatcher:
             raise ValueError('invalid_speaker_embedding_model')
         self.extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
         self.people = references['people']
+        self.display_names = references.get('displayNames', {})
 
     def tag(self, segments, turns, samples, asset_id=None):
         import numpy as np
+        from speaker_review import candidate_signals
+        evidence = []
         for row in segments:
             start, end, speaker = row['start'], row['end'], row['speaker']
             if speaker == 'unknown' or end - start < MIN_SECONDS:
@@ -91,9 +94,16 @@ class SpeakerMatcher:
             norm = float(np.linalg.norm(vector))
             if not math.isfinite(norm) or norm <= 0:
                 continue
-            candidate = suggest((vector/norm).tolist(), self.people, exclude_asset=asset_id)
+            embedding = (vector/norm).tolist()
+            candidate = suggest(embedding, self.people, exclude_asset=asset_id)
+            evidence.append({'start': start, 'end': stop, 'speaker': speaker, 'embedding': embedding,
+                             'alias': candidate['alias'] if candidate else None})
             if candidate:
+                name = self.display_names.get(candidate['alias']) if isinstance(self.display_names, dict) else None
+                if isinstance(name, str) and 0 < len(name) <= 80 and name.isprintable():
+                    candidate['displayName'] = name
                 row['speakerMatch'] = candidate
+        return candidate_signals(evidence)
 
 
 def visible_speaker(row):
@@ -101,5 +111,8 @@ def visible_speaker(row):
     if isinstance(match, dict) and match.get('status') == 'automatic_candidate':
         alias = match.get('alias', '')
         if re.fullmatch(r'[A-Za-z0-9_.-]{1,24}', alias):
+            name = match.get('displayName', alias)
+            if isinstance(name, str) and 0 < len(name) <= 80 and name.isprintable():
+                return f'{name} (automatic match, {row["speaker"]})'
             return f'{alias} (automatic match, {row["speaker"]})'
     return row['speaker']
