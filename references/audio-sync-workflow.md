@@ -50,7 +50,9 @@ Results live in the selected profile's `derivatives/qwen3-asr/`, separate from
 phone records, original media and user notes. Each completed run includes
 `result.json` and `transcript.md`, source/model hashes, detected language,
 anonymous speaker turns and the original timeline mapping. Do not overwrite
-phone transcripts with these derivatives. When answering about an asset with a
+phone transcripts with these derivatives. The temporary decoded WAV is removed
+after the transcript and result are saved. Failed runs retain it for diagnosis.
+When answering about an asset with a
 completed re-transcription, inspect that derivative alongside its original
 source and state which one is quoted. The phone-text semantic index remains
 an index of the captured phone text; it does not silently index derivatives.
